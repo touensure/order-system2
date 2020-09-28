@@ -98,8 +98,9 @@ public class OrderService {
 
         if (ListUtils.isEmpty(orderIds)) {
             Pageable pageable = getPageable(pageNumber, pageSize);
-            Page<Order> findResult = filterCancelledOrder?orderRepository.findAllAndStatusNot(OrderLineStatus.CANCELLED,pageable)
+            Page<Order> findResult = filterCancelledOrder?orderRepository.findByStatusNot(OrderLineStatus.CANCELLED,pageable)
                                                          :orderRepository.findAll(pageable);
+//            Page<Order> findResult = orderRepository.findAll(pageable);
             return dtoConverter.convert(findResult, OrderDto.class, pageable);
         } else {
             Pageable pageable = getPageable(pageNumber, pageSize);
