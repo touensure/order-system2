@@ -55,8 +55,14 @@ public class Order implements Serializable {
     @NotNull
     private OrderLineStatus status;
 
+    @Column(name = "ACCOUNT_NAME", unique = true, nullable = false)
+    @NotNull
+    private String accountName;
+
     @Column(name = "CUSTOMER_EMAIL", nullable = false)
     @Email(regexp = ".*@.*\\..*", message = "Email should be valid")
     @NotNull
     private String          customerEmail;
+
+
 }

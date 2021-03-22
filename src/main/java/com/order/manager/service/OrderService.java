@@ -1,16 +1,23 @@
 package com.order.manager.service;
 
+import com.auth0.jwt.JWT;
+import com.auth0.jwt.exceptions.JWTDecodeException;
 import com.order.manager.dto.order.OrderDto;
 import com.order.manager.dto.order.PostOrderRequest;
+import com.order.manager.enums.AccountType;
 import com.order.manager.enums.OrderLineStatus;
-import com.order.manager.exception.OrderLineNotFoundException;
+
+import com.order.manager.exception.AuthorizationFailedException;
 import com.order.manager.exception.OrderNotFoundException;
 import com.order.manager.mapper.DtoConverter;
+import com.order.manager.model.Account;
 import com.order.manager.model.Order;
+import com.order.manager.repository.AccountRepository;
 import com.order.manager.repository.OrderLineRepository;
 import com.order.manager.repository.OrderRepository;
 import com.order.manager.utils.CalculateOrder;
 import com.querydsl.jpa.impl.JPAQueryFactory;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.data.domain.Page;
@@ -21,10 +28,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 import com.order.manager.utils.RandomIdGenerator;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.validation.annotation.Validated;
-import org.thymeleaf.util.ListUtils;
 
 import javax.persistence.EntityManager;
+import javax.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 
 import java.util.List;
@@ -59,9 +65,16 @@ public class OrderService {
     @Autowired
     private DtoConverter        dtoConverter;
 
-    public OrderDto creatOrder(PostOrderRequest postOrderRequest, String orderId) {
+    @Autowired
+    private AccountRepository   accountRepository;
 
-        Order order = postOrderRequest.toOrder();
+    public OrderDto createOrder(PostOrderRequest postOrderRequest,
+                                String orderId,
+                                HttpServletRequest httpServletRequest) {
+
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
+
+        Order order = postOrderRequest.toOrder(account);
         if (orderId == null) {
             order.setOrderId(randomIdGenerator.orderIdGenerator());
         } else {
@@ -87,64 +100,87 @@ public class OrderService {
         return dtoConverter.convert(order, OrderDto.class);
     }
 
-    public Page<OrderDto> findAllOrders(Integer pageNumber, Integer pageSize) {
+    public Page<OrderDto> findAllOrdersByAccount(Integer pageNumber, Integer pageSize, HttpServletRequest httpServletRequest) {
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
         Pageable pageable = getPageable(pageNumber, pageSize);
-        Page<Order> findResult = orderRepository.findAll(pageable);
+        Page<Order> findResult;
+        if(account.getAccountType() == AccountType.CUSTOMER) {
+            findResult = orderRepository.findByAccountName(account.getAccountName(), pageable);
+        }else{
+            findResult = orderRepository.findAll(pageable);
+        }
         return dtoConverter.convert(findResult, OrderDto.class, pageable);//查一下Pageable
     }
 
-    public Page<OrderDto> findOrders(Integer pageNumber, Integer pageSize,
-                                     boolean filterCancelledOrder, List<String> orderIds) {
+    public Page<OrderDto> findOrdersByAccount(Integer pageNumber, Integer pageSize,
+                                              boolean filterDeletedOrder, List<String> orderIds,
+                                              HttpServletRequest httpServletRequest) {
 
-        if (ListUtils.isEmpty(orderIds)) {
-            Pageable pageable = getPageable(pageNumber, pageSize);
-            Page<Order> findResult = filterCancelledOrder?orderRepository.findByStatusNot(OrderLineStatus.CANCELLED,pageable)
-                                                         :orderRepository.findAll(pageable);
-//            Page<Order> findResult = orderRepository.findAll(pageable);
-            return dtoConverter.convert(findResult, OrderDto.class, pageable);
-        } else {
-            Pageable pageable = getPageable(pageNumber, pageSize);
-            Page<Order> findResult = filterCancelledOrder
-                ? orderRepository.findByOrderIdInAndStatusNot(orderIds, OrderLineStatus.CANCELLED,
-                    pageable)
-                : orderRepository.findByOrderIdIn(orderIds, pageable);
-            if(findResult.getContent().isEmpty()){
-                throw new OrderNotFoundException(String.join(",",orderIds));
-            }
-            return dtoConverter.convert(findResult, OrderDto.class, pageable);
-
-            //            BooleanBuilder builder = new BooleanBuilder();
-            //            builder.and(QOrder.order.orderId.in(orderIds));//可以放到查询的where里面去
-            //            JPAQuery<Order> query = jpaQueryFactory.selectFrom(QOrder.order)
-            //                                                   .where(QOrder.order.orderId.in(orderIds))
-            //                                                   .offset(pageable.getOffset())
-            //                                                   .limit(pageable.getPageSize())
-            //                                                   .orderBy(QOrder.order.createAt.asc());//先查找
-            //            return new PageImpl<>(query.fetch(),pageable,query.fetchCount());
-        }
-    }
-
-    public List<OrderDto> deleteOrders(List<String> orderIds) throws OrderNotFoundException {
-
-        List<Order> orders = new ArrayList<>();
-        orderIds.forEach(orderId -> {
-            Order order = orderRepository.findByOrderId(orderId);
-            if (order != null) {
-                orders.add(order);
-                orderRepository.deleteByOrderId(orderId);
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
+        Pageable pageable = getPageable(pageNumber, pageSize);
+        Page<Order> findResult;
+        if(account.getAccountType() == AccountType.CUSTOMER) {
+            if (orderIds.size() == 0) {
+                findResult = filterDeletedOrder ? orderRepository.findByStatusNotAndAccountName(
+                                                                                OrderLineStatus.DELETED,
+                                                                                account.getAccountName(),
+                                                                                pageable)
+                                                : orderRepository.findByAccountName(account.getAccountName(), pageable);
             } else {
-                throw new OrderNotFoundException(orderId);
+                findResult = filterDeletedOrder ? orderRepository.findByOrderIdInAndStatusNotAndAccountName(
+                                                                                orderIds,
+                                                                                OrderLineStatus.DELETED,
+                                                                                account.getAccountName(),
+                                                                                pageable)
+                                                : orderRepository.findByOrderIdInAndAccountName(orderIds,
+                                                                                                account.getAccountName(),
+                                                                                                pageable);
+                validateOrderIds(findResult.getContent(), orderIds);
+
+                //            BooleanBuilder builder = new BooleanBuilder();
+                //            builder.and(QOrder.order.orderId.in(orderIds));//可以放到查询的where里面去
+                //            JPAQuery<Order> query = jpaQueryFactory.selectFrom(QOrder.order)
+                //                                                   .where(QOrder.order.orderId.in(orderIds))
+                //                                                   .offset(pageable.getOffset())
+                //                                                   .limit(pageable.getPageSize())
+                //                                                   .orderBy(QOrder.order.createAt.asc());//先查找
+                //            return new PageImpl<>(query.fetch(),pageable,query.fetchCount());
             }
-        });
-        return dtoConverter.convert(orders, OrderDto.class);
+        }else{
+            if(orderIds.size() == 0){
+                findResult = filterDeletedOrder ? orderRepository.findByStatusNot(OrderLineStatus.DELETED, pageable)
+                                                : orderRepository.findAll(pageable);
+            }else{
+                findResult = filterDeletedOrder ? orderRepository.findByOrderIdInAndStatusNot(
+                                                                                    orderIds,
+                                                                                    OrderLineStatus.DELETED,
+                                                                                    pageable)
+                                                : orderRepository.findByOrderIdIn(orderIds, pageable);
+                validateOrderIds(findResult.getContent(), orderIds);
+            }
+        }
+
+        return dtoConverter.convert(findResult, OrderDto.class, pageable);
     }
 
-    public List<OrderDto> cancelOrders(List<String> orderIds) {
-        List<Order> orders = orderIds.stream()
-            .map(orderId -> orderRepository.findByOrderId(orderId)).filter(Objects::nonNull)
-            .peek(order -> order.setStatus(OrderLineStatus.CANCELLED)).collect(Collectors.toList());
-        orders.forEach(order -> orderRepository.saveAndFlush(order));
-        return dtoConverter.convert(orders, OrderDto.class);
+    public List<OrderDto> deleteOrders(List<String> orderIds,
+                                       HttpServletRequest httpServletRequest) {
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
+        List<Order> ordersFound = orderIds.stream()
+            .map(orderId -> orderRepository.findByAccountNameAndOrderId(account.getAccountName(),orderId))
+            .filter(Objects::nonNull)
+            .peek(order -> order.setStatus(OrderLineStatus.DELETED)).collect(Collectors.toList());
+        validateOrderIds(ordersFound, orderIds);
+        ordersFound.forEach(order -> orderRepository.saveAndFlush(order));
+        return dtoConverter.convert(ordersFound, OrderDto.class);
+    }
+
+    private void validateOrderIds(List<Order> ordersFound, List<String> orderIds){
+        List<String> orderIdsFund = ordersFound.stream().map(Order::getOrderId).collect(Collectors.toList());
+        String ordersNotFound = orderIds.stream().filter(orderId -> !orderIdsFund.contains(orderId)).collect(Collectors.joining(","));
+        if(ordersNotFound.length() != 0){
+            throw new OrderNotFoundException(ordersNotFound);
+        }
     }
 
     private Pageable getPageable(Integer pageNumber, Integer pageSize) {
@@ -152,5 +188,19 @@ public class OrderService {
         Sort.Order sort = new Sort.Order(Sort.Direction.DESC, "createAt");
         sortProperties.add(sort);
         return PageRequest.of(pageNumber, pageSize, Sort.by(sortProperties));
+    }
+
+    private Account getAccountByToken(String token){
+        String accountName;
+        try {
+            accountName = JWT.decode(token).getClaim("accountName").asString();
+        } catch (JWTDecodeException j) {
+            throw new AuthorizationFailedException("JWT decoding error！");
+        }
+        Account accountOnDB = accountRepository.findByAccountName(accountName);
+        if (accountOnDB == null) {
+            throw new AuthorizationFailedException(String.format("no token available, login again please"));
+        }
+        return accountOnDB;
     }
 }

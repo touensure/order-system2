@@ -6,7 +6,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 
 @ResponseStatus(value = HttpStatus.NOT_FOUND)
 public class OrderNotFoundException  extends RuntimeException{
-    private static final String MESSAGE = "order:%s doesn't exist when updating an order";
+    private static final String MESSAGE = "order:%s doesn't exist";
 
     public OrderNotFoundException(final String orderId) {
         super(String.format(MESSAGE, orderId));

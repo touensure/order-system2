@@ -4,6 +4,7 @@ create table order_table
     create_at timestamp not null,
     total_price numeric(10,2) not null,
     status varchar(255) not null,
+    account_name varchar(255) not null,
     customer_email varchar(255) not null,
     none_physical_delete BOOLEAN not null
 );

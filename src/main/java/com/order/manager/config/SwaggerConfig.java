@@ -1,6 +1,6 @@
 package com.order.manager.config;
 
-import com.github.xiaoymin.swaggerbootstrapui.annotations.EnableSwaggerBootstrapUI;
+
 import com.google.common.collect.Lists;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -37,10 +37,8 @@ public class SwaggerConfig {
                 .apiInfo(apiInfo())
                 .select()
                 .apis(RequestHandlerSelectors.basePackage("com.order.manager.web"))
-//                .apis(RequestHandlerSelectors.any())
-                .paths(PathSelectors.any())
+                .paths(PathSelectors.any())// 选择所有的API,如果想只为部分API生成文档，可以配置这里
                 .build()
-
                 .useDefaultResponseMessages(false)
                 .globalResponseMessage(RequestMethod.GET, newArrayList(
                         new ResponseMessageBuilder()
@@ -74,8 +72,72 @@ public class SwaggerConfig {
                                 .responseModel(new ModelRef(" Server Error"))
                                 .build()
                 ))
-//                .securityContexts(Lists.newArrayList(securityContexts()))
-//                .securitySchemes(securitySchemes())
+                .globalResponseMessage(RequestMethod.POST, newArrayList(
+                        new ResponseMessageBuilder()
+                                .code(200)
+                                .message("Ok, implementation is successful")
+                                .responseModel(new ModelRef("successful"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(201)
+                                .message("Created, successfully created an item")
+                                .responseModel(new ModelRef("creation successful"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(401)
+                                .message("Unauthorized, authorization failed")
+                                .responseModel(new ModelRef("authorization Error"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(403)
+                                .message("Forbidden, resource is unavailable")
+                                .responseModel(new ModelRef("Forbidden"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(404)
+                                .message("cannot found")
+                                .responseModel(new ModelRef(" Not Found Error"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(500)
+                                .message("internal server error,A server-side exception occurred that prevented the system from correctly returning the result.")
+                                .responseModel(new ModelRef(" Server Error"))
+                                .build()
+                ))
+                .globalResponseMessage(RequestMethod.PUT, newArrayList(
+                        new ResponseMessageBuilder()
+                                .code(200)
+                                .message("Ok, implementation is successful")
+                                .responseModel(new ModelRef("successful"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(201)
+                                .message("Created, successfully created an item")
+                                .responseModel(new ModelRef("creation successful"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(401)
+                                .message("Unauthorized, authorization failed")
+                                .responseModel(new ModelRef("authorization Error"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(403)
+                                .message("Forbidden, resource is unavailable")
+                                .responseModel(new ModelRef("Forbidden"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(404)
+                                .message("cannot found")
+                                .responseModel(new ModelRef(" Not Found Error"))
+                                .build(),
+                        new ResponseMessageBuilder()
+                                .code(500)
+                                .message("internal server error,A server-side exception occurred that prevented the system from correctly returning the result.")
+                                .responseModel(new ModelRef(" Server Error"))
+                                .build()
+                ))
+                .securityContexts(Lists.newArrayList(securityContexts()))
+                .securitySchemes(securitySchemes())
                 ;
     }
 
@@ -97,7 +159,7 @@ public class SwaggerConfig {
         return newArrayList(
                 SecurityContext.builder()
                         .securityReferences(defaultAuth())
-                        .forPaths(PathSelectors.regex("^(?!doc).*$"))
+                        .forPaths(PathSelectors.regex("^(?!login).*$"))
 //                        .forPaths(PathSelectors.regex("/.*"))
                         .build()
         );

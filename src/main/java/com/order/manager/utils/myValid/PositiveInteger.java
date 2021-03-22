@@ -1,6 +1,5 @@
 package com.order.manager.utils.myValid;
 
-import com.order.manager.utils.myValid.PositiveIntegerValidator;
 import javax.validation.Constraint;
 import javax.validation.Payload;
 import java.lang.annotation.ElementType;

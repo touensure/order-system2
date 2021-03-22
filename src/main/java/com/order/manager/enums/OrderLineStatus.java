@@ -6,5 +6,5 @@ import java.util.stream.Stream;
 
 public enum OrderLineStatus implements Serializable {
     DRAFT,
-    CANCELLED;
+    DELETED;
 }
