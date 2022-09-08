@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.validation.constraints.NotNull;
 import java.util.List;
 
 import static com.order.manager.constant.Constant.ADMINISTRATOR_CUSTOMER_SCOPE;
@@ -51,7 +52,7 @@ public class OrderController {
         if (!bindingResult.getAllErrors().isEmpty()) {
             throw new ValidationException(bindingResult.getFieldErrors());
         }
-        OrderDto orderDto = orderService.createOrder(postOrderRequest, null, httpServletRequest);
+        OrderDto orderDto = orderService.createOrder(postOrderRequest, httpServletRequest);
         return ResponseEntity.ok(orderDto);
     }
 
@@ -70,7 +71,7 @@ public class OrderController {
     public ResponseEntity<Page<OrderDto>> findOrders(@RequestParam(defaultValue = "0") final Integer pageNumber,
                                                      @RequestParam(defaultValue = "10") final Integer pageSize,
                                                      @RequestParam(defaultValue = "false") final boolean filterDeletedOrder,
-                                                     @PathVariable("ids") String ids,
+                                                     @PathVariable("ids") @NotNull String ids,
                                                      final HttpServletRequest httpServletRequest) {
         List<String> orderIds = List.of(ids.split(COMMA));
         return ResponseEntity
@@ -81,23 +82,23 @@ public class OrderController {
     @Authorize(value = CUSTOMER_SCOPE)
     @PutMapping(value = "/{id}", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<OrderDto> updateOrder(@Validated @RequestBody final PostOrderRequest postOrderRequest,
-                                                @PathVariable final String id,
+                                                @PathVariable @NotNull final String id,
                                                 final HttpServletRequest httpServletRequest,
                                                 final BindingResult bindingResult) {
         if (!bindingResult.getAllErrors().isEmpty()) {
             throw new ValidationException(bindingResult.getFieldErrors());
         }
-        OrderDto order = orderService.createOrder(postOrderRequest, id, httpServletRequest);
+        OrderDto order = orderService.updateOrder(postOrderRequest, id, httpServletRequest);
         return ResponseEntity.ok(order);
     }
 
     @ApiOperation(value = "delete order", notes = "delete order by order Id, multiple order Id is supported")
     @Authorize(value = CUSTOMER_SCOPE)
     @DeleteMapping(value = "/{ids}")
-    public ResponseEntity<List<OrderDto>> deleteOrder(@PathVariable final String ids,
+    public ResponseEntity<List<OrderDto>> deleteOrder(@PathVariable @NotNull final String ids,
                                                       final HttpServletRequest httpServletRequest) {
         List<String> orderIds = List.of(ids.split(","));
-        List<OrderDto> orders = orderService.deleteOrders(orderIds, httpServletRequest);
+        List<OrderDto> orders = orderService.softDeleteOrders(orderIds, httpServletRequest);
         return ResponseEntity.ok(orders);
     }
 

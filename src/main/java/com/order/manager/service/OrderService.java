@@ -9,11 +9,12 @@ import com.order.manager.enums.OrderLineStatus;
 
 import com.order.manager.exception.AuthorizationFailedException;
 import com.order.manager.exception.OrderNotFoundException;
+import com.order.manager.jdbc.OrderJDBCRepository;
+import com.order.manager.jdbc.OrderLineJDBCRepository;
 import com.order.manager.mapper.DtoConverter;
 import com.order.manager.model.Account;
 import com.order.manager.model.Order;
 import com.order.manager.repository.AccountRepository;
-import com.order.manager.repository.OrderLineRepository;
 import com.order.manager.repository.OrderRepository;
 import com.order.manager.utils.CalculateOrder;
 import com.querydsl.jpa.impl.JPAQueryFactory;
@@ -48,66 +49,74 @@ public class OrderService {
     }
 
     @Autowired
-    private JPAQueryFactory     jpaQueryFactory;
+    private JPAQueryFactory         jpaQueryFactory;
 
     @Autowired
-    private OrderRepository     orderRepository;
+    private OrderRepository         orderRepository;
+    @Autowired
+    private OrderJDBCRepository     orderJDBCRepository;
+
+    //    @Autowired
+    //    private OrderLineRepository orderLineRepository;
+    @Autowired
+    private OrderLineJDBCRepository orderLineRepository;
 
     @Autowired
-    private OrderLineRepository orderLineRepository;
+    private CalculateOrder          calculateOrder;
 
     @Autowired
-    private CalculateOrder      calculateOrder;
+    private RandomIdGenerator       randomIdGenerator;
 
     @Autowired
-    private RandomIdGenerator   randomIdGenerator;
+    private DtoConverter            dtoConverter;
 
     @Autowired
-    private DtoConverter        dtoConverter;
-
-    @Autowired
-    private AccountRepository   accountRepository;
+    private AccountRepository       accountRepository;
 
     public OrderDto createOrder(PostOrderRequest postOrderRequest,
-                                String orderId,
                                 HttpServletRequest httpServletRequest) {
 
         Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
 
         Order order = postOrderRequest.toOrder(account);
-        if (orderId == null) {
-            order.setOrderId(randomIdGenerator.orderIdGenerator());
-        } else {
-            Order existingOrder = orderRepository.findByOrderId(orderId);
-            if (existingOrder == null) {
-                throw new OrderNotFoundException(orderId);
-            }else{
-                orderRepository.deleteByOrderId(existingOrder.getOrderId());
-                existingOrder.getOrderLines().forEach(orderLine -> orderLineRepository.deleteByUuid(orderLine.getUuid()));
-            }
-
-//            order.getOrderLines().forEach(orderLine -> {
-//                if (orderLineRepository.findByUuid(orderLine.getUuid()) == null) {
-//                    throw new OrderLineNotFoundException(orderLine.getUuid());
-//                }
-//            });
-            order.setOrderId(orderId);
-        }
+        order.setOrderId(randomIdGenerator.orderIdGenerator());
 
         calculateOrder.calculateOrderTotalPrice(order);
-        orderRepository.saveAndFlush(order);
-        order.getOrderLines().forEach(orderLine -> orderLineRepository.saveAndFlush(orderLine));
+        orderJDBCRepository.saveAndFlush(order);
         return dtoConverter.convert(order, OrderDto.class);
     }
 
-    public Page<OrderDto> findAllOrdersByAccount(Integer pageNumber, Integer pageSize, HttpServletRequest httpServletRequest) {
+    public OrderDto updateOrder(PostOrderRequest postOrderRequest, String orderId,
+                                HttpServletRequest httpServletRequest) {
+
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
+        Order existingOrder = orderJDBCRepository.findByAccountNameAndOrderId(account.getAccountName(), orderId);
+        if (existingOrder == null) {
+            throw new OrderNotFoundException(orderId);
+        }
+
+        Order newOrder = postOrderRequest.updateOrder(existingOrder);
+
+        //            order.getOrderLines().forEach(orderLine -> {
+        //                if (orderLineRepository.findByUuid(orderLine.getUuid()) == null) {
+        //                    throw new OrderLineNotFoundException(orderLine.getUuid());
+        //                }
+        //            });
+
+        calculateOrder.calculateOrderTotalPrice(newOrder);
+        orderJDBCRepository.saveAndFlush(newOrder);
+        return dtoConverter.convert(newOrder, OrderDto.class);
+    }
+
+    public Page<OrderDto> findAllOrdersByAccount(Integer pageNumber, Integer pageSize,
+                                                 HttpServletRequest httpServletRequest) {
         Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
         Pageable pageable = getPageable(pageNumber, pageSize);
         Page<Order> findResult;
-        if(account.getAccountType() == AccountType.CUSTOMER) {
-            findResult = orderRepository.findByAccountName(account.getAccountName(), pageable);
-        }else{
-            findResult = orderRepository.findAll(pageable);
+        if (account.getAccountType() == AccountType.CUSTOMER) {
+            findResult = orderJDBCRepository.findByAccountName(account.getAccountName(), pageable);
+        } else {
+            findResult = orderJDBCRepository.findAll(pageable);
         }
         return dtoConverter.convert(findResult, OrderDto.class, pageable);//查一下Pageable
     }
@@ -119,66 +128,86 @@ public class OrderService {
         Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
         Pageable pageable = getPageable(pageNumber, pageSize);
         Page<Order> findResult;
-        if(account.getAccountType() == AccountType.CUSTOMER) {
-            if (orderIds.size() == 0) {
-                findResult = filterDeletedOrder ? orderRepository.findByStatusNotAndAccountName(
-                                                                                OrderLineStatus.DELETED,
-                                                                                account.getAccountName(),
-                                                                                pageable)
-                                                : orderRepository.findByAccountName(account.getAccountName(), pageable);
-            } else {
-                findResult = filterDeletedOrder ? orderRepository.findByOrderIdInAndStatusNotAndAccountName(
-                                                                                orderIds,
-                                                                                OrderLineStatus.DELETED,
-                                                                                account.getAccountName(),
-                                                                                pageable)
-                                                : orderRepository.findByOrderIdInAndAccountName(orderIds,
-                                                                                                account.getAccountName(),
-                                                                                                pageable);
-                validateOrderIds(findResult.getContent(), orderIds);
+        boolean shouldShowAllOrders = shouldShowAllOrders(orderIds);
+        if (account.getAccountType() == AccountType.CUSTOMER) {
+            if (shouldShowAllOrders) {
+                findResult = filterDeletedOrder
+                    ? orderJDBCRepository.findByStatusNotAndAccountName(OrderLineStatus.DELETED,
+                        account.getAccountName(), pageable)
+                    : orderJDBCRepository.findByAccountName(account.getAccountName(), pageable);
+                return dtoConverter.convert(findResult, OrderDto.class, pageable);
+            }
 
-                //            BooleanBuilder builder = new BooleanBuilder();
-                //            builder.and(QOrder.order.orderId.in(orderIds));//可以放到查询的where里面去
-                //            JPAQuery<Order> query = jpaQueryFactory.selectFrom(QOrder.order)
-                //                                                   .where(QOrder.order.orderId.in(orderIds))
-                //                                                   .offset(pageable.getOffset())
-                //                                                   .limit(pageable.getPageSize())
-                //                                                   .orderBy(QOrder.order.createAt.asc());//先查找
-                //            return new PageImpl<>(query.fetch(),pageable,query.fetchCount());
-            }
-        }else{
-            if(orderIds.size() == 0){
-                findResult = filterDeletedOrder ? orderRepository.findByStatusNot(OrderLineStatus.DELETED, pageable)
-                                                : orderRepository.findAll(pageable);
-            }else{
-                findResult = filterDeletedOrder ? orderRepository.findByOrderIdInAndStatusNot(
-                                                                                    orderIds,
-                                                                                    OrderLineStatus.DELETED,
-                                                                                    pageable)
-                                                : orderRepository.findByOrderIdIn(orderIds, pageable);
-                validateOrderIds(findResult.getContent(), orderIds);
-            }
+            findResult = filterDeletedOrder
+                ? orderJDBCRepository.findByOrderIdInAndStatusNotAndAccountName(orderIds,
+                    OrderLineStatus.DELETED, account.getAccountName(), pageable)
+                : orderJDBCRepository.findByOrderIdInAndAccountName(orderIds,
+                    account.getAccountName(), pageable);
+
+            //            BooleanBuilder builder = new BooleanBuilder();
+            //            builder.and(QOrder.order.orderId.in(orderIds));//可以放到查询的where里面去
+            //            JPAQuery<Order> query = jpaQueryFactory.selectFrom(QOrder.order)
+            //                                                   .where(QOrder.order.orderId.in(orderIds))
+            //                                                   .offset(pageable.getOffset())
+            //                                                   .limit(pageable.getPageSize())
+            //                                                   .orderBy(QOrder.order.createAt.asc());//先查找
+            //            return new PageImpl<>(query.fetch(),pageable,query.fetchCount());
+            return dtoConverter.convert(findResult, OrderDto.class, pageable);
         }
 
+        if (shouldShowAllOrders) {
+            findResult = filterDeletedOrder
+                ? orderJDBCRepository.findByStatusNot(OrderLineStatus.DELETED, pageable)
+                : orderJDBCRepository.findAll(pageable);
+            return dtoConverter.convert(findResult, OrderDto.class, pageable);
+        }
+
+        findResult = filterDeletedOrder
+            ? orderJDBCRepository.findByOrderIdInAndStatusNot(orderIds,
+                OrderLineStatus.DELETED, pageable)
+            : orderJDBCRepository.findByOrderIdIn(orderIds, pageable);
         return dtoConverter.convert(findResult, OrderDto.class, pageable);
     }
 
-    public List<OrderDto> deleteOrders(List<String> orderIds,
+    public List<OrderDto> softDeleteOrders(List<String> orderIds,
                                        HttpServletRequest httpServletRequest) {
         Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
         List<Order> ordersFound = orderIds.stream()
-            .map(orderId -> orderRepository.findByAccountNameAndOrderId(account.getAccountName(),orderId))
-            .filter(Objects::nonNull)
-            .peek(order -> order.setStatus(OrderLineStatus.DELETED)).collect(Collectors.toList());
+            .map(orderId -> orderJDBCRepository
+                .findByAccountNameAndOrderId(account.getAccountName(), orderId))
+            .filter(Objects::nonNull).peek(order -> order.setStatus(OrderLineStatus.DELETED))
+            .collect(Collectors.toList());
         validateOrderIds(ordersFound, orderIds);
-        ordersFound.forEach(order -> orderRepository.saveAndFlush(order));
+        ordersFound.forEach(order -> orderJDBCRepository.saveAndFlush(order));
         return dtoConverter.convert(ordersFound, OrderDto.class);
     }
 
-    private void validateOrderIds(List<Order> ordersFound, List<String> orderIds){
-        List<String> orderIdsFund = ordersFound.stream().map(Order::getOrderId).collect(Collectors.toList());
-        String ordersNotFound = orderIds.stream().filter(orderId -> !orderIdsFund.contains(orderId)).collect(Collectors.joining(","));
-        if(ordersNotFound.length() != 0){
+    public List<OrderDto> hardDeleteOrdersWithinAccount(List<String> orderIds,
+                                                        HttpServletRequest httpServletRequest) {
+        Account account = getAccountByToken(httpServletRequest.getHeader("Authorization"));
+        List<Order> ordersDeleted = hardDeleteOrders(orderIds, account);
+        return dtoConverter.convert(ordersDeleted, OrderDto.class);
+    }
+
+    private List<Order> hardDeleteOrders(List<String> orderIds, Account account) {
+        List<Order> ordersDeleted = orderIds.stream()
+            .map(orderId -> orderJDBCRepository
+                .findByAccountNameAndOrderId(account.getAccountName(), orderId))
+            .filter(Objects::nonNull).peek(order -> {
+                order.getOrderLines()
+                    .forEach(orderLine -> orderLineRepository.deleteByUuid(orderLine.getUuid()));
+                orderJDBCRepository.deleteByOrderId(order.getOrderId());
+            }).collect(Collectors.toList());
+        validateOrderIds(ordersDeleted, orderIds);
+        return ordersDeleted;
+    }
+
+    private void validateOrderIds(List<Order> ordersFound, List<String> orderIds) {
+        List<String> orderIdsFund = ordersFound.stream().map(Order::getOrderId)
+            .collect(Collectors.toList());
+        String ordersNotFound = orderIds.stream().filter(orderId -> !orderIdsFund.contains(orderId))
+            .collect(Collectors.joining(","));
+        if (ordersNotFound.length() != 0) {
             throw new OrderNotFoundException(ordersNotFound);
         }
     }
@@ -190,7 +219,7 @@ public class OrderService {
         return PageRequest.of(pageNumber, pageSize, Sort.by(sortProperties));
     }
 
-    private Account getAccountByToken(String token){
+    private Account getAccountByToken(String token) {
         String accountName;
         try {
             accountName = JWT.decode(token).getClaim("accountName").asString();
@@ -199,8 +228,13 @@ public class OrderService {
         }
         Account accountOnDB = accountRepository.findByAccountName(accountName);
         if (accountOnDB == null) {
-            throw new AuthorizationFailedException(String.format("no token available, login again please"));
+            throw new AuthorizationFailedException(
+                String.format("no token available, login again please"));
         }
         return accountOnDB;
+    }
+
+    private boolean shouldShowAllOrders(List<String> orderIds){
+        return orderIds.size() == 1 && orderIds.get(0).equals("ALL");
     }
 }

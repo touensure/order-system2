@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OrderLineRepository extends JpaRepository<OrderLine,Long> {
     OrderLine findByUuid(String uuid);
-    Integer deleteByUuid(String uuid);
+    void deleteByUuid(String uuid);
 }

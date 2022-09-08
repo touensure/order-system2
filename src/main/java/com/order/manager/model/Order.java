@@ -57,12 +57,15 @@ public class Order implements Serializable {
 
     @Column(name = "ACCOUNT_NAME", unique = true, nullable = false)
     @NotNull
-    private String accountName;
+    private String          accountName;
 
     @Column(name = "CUSTOMER_EMAIL", nullable = false)
     @Email(regexp = ".*@.*\\..*", message = "Email should be valid")
     @NotNull
     private String          customerEmail;
 
-
+    public OrderLine lineOfnumber(Integer lineNumber) {
+        return this.getOrderLines().stream().filter(ol -> ol.getLineNumber().equals(lineNumber))
+            .findFirst().orElse(null);
+    }
 }
